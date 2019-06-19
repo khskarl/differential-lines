@@ -14,6 +14,7 @@ struct ParticleSystem {
     positions: Vec<Point2>,
     colors: Vec<Rgba<f32>>,
     edges: Vec<(usize, usize)>,
+    pressures: Vec<Vector2>,
 }
 
 impl ParticleSystem {
@@ -21,14 +22,31 @@ impl ParticleSystem {
         let positions = Vec::new();
         let colors = Vec::new();
         let edges = Vec::new();
+        let pressures = Vec::new();
 
         ParticleSystem {
             num_particles: 0,
             positions,
             colors,
             edges,
+            pressures,
         }
     }
+
+    fn add_particle(
+        &mut self,
+        position: Point2,
+        color: Rgba<f32>,
+        edges: (usize, usize),
+        pressure: Vector2,
+    ) {
+        self.positions.push(position);
+        self.colors.push(color);
+        self.edges.push(edges);
+        self.pressures.push(pressure);
+        self.num_particles += 1;
+    }
+
 
     fn spawn_particles(&mut self, num_particles: usize) {
         let delta_phi = (2.0 * PI) / num_particles as f32;
@@ -40,9 +58,6 @@ impl ParticleSystem {
 
             let l = random_f32() * 0.8 + 0.1;
             let color = Rgba::new(l, l - random_f32() * 0.2, l - random_f32() * 0.1, 1.0);
-
-            self.positions.push(position);
-            self.colors.push(color);
 
             let prev_particle = {
                 if i as i32 - 1 < 0 {
@@ -60,7 +75,10 @@ impl ParticleSystem {
                 }
             };
 
-            self.edges.push((prev_particle, next_particle));
+            let edges = (prev_particle, next_particle);
+            let pressure = vec2(0.0, 0.0);
+
+            self.add_particle(position, color, edges, pressure);
 
             phi += delta_phi;
         }
@@ -69,71 +87,71 @@ impl ParticleSystem {
     }
 
     fn update(&mut self) {
+
+        let old_positions = self.positions.clone();
         for i in 0..self.num_particles {
             let neighbors = self.get_neighbors_of_particle(i);
-
             let brotherhood_center = {
                 let (b0, b1) = self.edges[i];
-                (self.positions[b0] + self.positions[b1]) / 2.0
+                (old_positions[b0] + old_positions[b1]) / 2.0
             };
-            let direction_to_brotherhood = brotherhood_center - self.positions[i];
+            let direction_to_brotherhood = brotherhood_center - old_positions[i];
             self.positions[i] += direction_to_brotherhood.normalize() * 0.5;
-
             let hateship_center = {
                 let quantity = neighbors.len() as f32;
                 let mut center = vec2(0.0, 0.0);
                 for j in neighbors {
-                    center += self.positions[j];
+                    center += old_positions[j];
                 }
                 center / quantity.max(1.0)
             };
 
-            let direction_from_hate = self.positions[i] - hateship_center;
-            self.positions[i] += direction_from_hate.normalize() * 0.3;
+            self.pressures[i] = hateship_center;
+            self.positions[i] += (old_positions[i] - hateship_center).normalize() * 0.3;
+        }
 
-            {
-                let (b0, b1) = self.edges[i];
-                let (pos_b0, pos_b1) = (self.positions[b0], self.positions[b1]);
-                let pos_i = self.positions[i];
+        for i in 0..self.num_particles {
+            let (b0, b1) = self.edges[i];
+            let (pos_b0, pos_b1) = (self.positions[b0], self.positions[b1]);
+            let pos_i = self.positions[i];
 
-                let to_b0 = (pos_b0 - pos_i).normalize();
-                let to_b1 = (pos_b1 - pos_i).normalize();
-                let to_center = ((pos_b0 + pos_b1 + pos_i) / 3.0 - pos_i).normalize();
+            let to_b0 = (pos_b0 - pos_i).normalize();
+            let to_b1 = (pos_b1 - pos_i).normalize();
+            let to_center = ((pos_b0 + pos_b1 + pos_i) / 3.0 - pos_i).normalize();
 
-                let tolerance = 0.05;
-                if to_b0.dot(to_center).abs() < tolerance && random_f32() < 0.05 {
-                    self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                    self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                    self.split_at(b0, i);
-                } else {
-                    self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                    self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                }
+            let tolerance = 0.05;
+            if to_b0.dot(to_center).abs() < tolerance && random_f32() < 0.15 {
+                self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.split_at(b0, i);
+            } else {
+                self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+            }
 
-                if to_b1.dot(to_center).abs() < tolerance && random_f32() < 0.05 {
-                    self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                    self.colors[b1] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                    self.split_at(i, b1);
-                } else {
-                    self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                    self.colors[b1] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                }
+            if to_b1.dot(to_center).abs() < tolerance && random_f32() < 0.15 {
+                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.colors[b1] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.split_at(i, b1);
+            } else {
+                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                self.colors[b1] = Rgba::new(1.0, 0.3, 0.2, 1.0);
             }
         }
     }
 
+
     fn split_at(&mut self, p0: usize, p1: usize) {
         let new_index = self.positions.len();
-        let new_pos = (self.positions[p0] + self.positions[p1]) / 2.0;
-        let new_color = (self.colors[p0] + self.colors[p1]) / 2.0;
 
-        self.positions.push(new_pos);
-        self.colors.push(new_color);
-        self.edges.push((p0, p1));
-        self.num_particles += 1;
+        let position = (self.positions[p0] + self.positions[p1]) / 2.0;
+        let color = (self.colors[p0] + self.colors[p1]) / 2.0;
+        let edges = (p0, p1);
+        let pressure = vec2(0.0, 0.0);
 
         self.edges[p0].1 = new_index;
         self.edges[p1].0 = new_index;
+        self.add_particle(position, color, edges, pressure);
     }
 
     fn get_neighbors_of_particle(&self, index: usize) -> Vec<usize> {
@@ -177,6 +195,13 @@ impl ParticleSystem {
                 self.colors[i].blue,
                 self.colors[i].alpha,
             );
+
+
+            draw.line()
+                .start(self.positions[i])
+                .end(self.positions[i] + self.pressures[i])
+                .thickness(thickness)
+                .rgba(0.8, 0.8, 0.8, 1.0);
         }
     }
 }
@@ -190,7 +215,7 @@ fn model(app: &App) -> Model {
 
     // let (_w, h) = app.window_rect().w_h();
     let mut ps = ParticleSystem::new();
-    ps.spawn_particles(100);
+    ps.spawn_particles(20);
 
     Model { ps }
 }
@@ -201,8 +226,8 @@ fn update(_app: &App, m: &mut Model, _update: Update) {
 
 fn view(app: &App, m: &Model, frame: Frame) -> Frame {
     let draw = app.draw();
-    // draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
-    draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
+    draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
+    // draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
 
     m.ps.draw(&draw);
 
