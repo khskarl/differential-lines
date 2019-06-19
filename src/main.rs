@@ -106,7 +106,7 @@ impl ParticleSystem {
                 center / quantity.max(1.0)
             };
 
-            self.pressures[i] = hateship_center;
+            self.pressures[i] = old_positions[i] - hateship_center;
             self.positions[i] += (old_positions[i] - hateship_center).normalize() * 0.3;
         }
 
