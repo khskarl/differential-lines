@@ -63,7 +63,9 @@ impl ParticleSystem {
 
         for i in 0..num_particles {
             let direction = vec2(phi.cos(), phi.sin());
-            let position = direction * spawn_radius;
+            let offset = (phi * 6.2).sin() * 50.0;
+            println!("Phi: {} \tOffset: {}", phi, offset);
+            let position = direction * (spawn_radius + offset);
 
             let l = random_f32() * 0.8 + 0.1;
             let color = Rgba::new(l, l - random_f32() * 0.2, l - random_f32() * 0.1, 1.0);
@@ -101,26 +103,24 @@ impl ParticleSystem {
         let old_positions = self.positions.clone();
         for i in 0..self.num_particles {
             let neighbors = self.get_neighbors_of_particle(i);
-            let brotherhood_center = {
+            let attraction = {
                 let (b0, b1) = self.edges[i];
-                (old_positions[b0] + old_positions[b1]) / 2.0
+                (old_positions[b0] + old_positions[b1]) / 2.0 - old_positions[i]
             };
-            self.attractions[i] = brotherhood_center - old_positions[i];
-            self.positions[i] += (brotherhood_center - old_positions[i]).normalize() * 0.5;
-            let hateship_center = {
-                let quantity = neighbors.len() as f32;
-                let mut center = vec2(0.0, 0.0);
-                if quantity < 1.0 {
-                    center = old_positions[i];
-                }
-                for j in neighbors {
-                    center += old_positions[j];
-                }
-                center / quantity.max(1.0)
-            };
+            self.attractions[i] = attraction;
+            self.positions[i] += attraction * 0.6;
 
-            self.pressures[i] = old_positions[i] - hateship_center;
-            self.positions[i] += (old_positions[i] - hateship_center).normalize() * 0.5;
+            let pressure = {
+                let mut pressure = vec2(0.0, 0.0);
+                for j in neighbors {
+                    pressure +=
+                        (self.positions[i] - self.positions[j]) / (self.influence_radius * 0.5);
+                }
+
+                pressure
+            };
+            self.pressures[i] = pressure;
+            self.positions[i] += (pressure).normalize() * 0.5;
         }
 
         for i in 0..self.num_particles {
