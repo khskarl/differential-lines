@@ -24,12 +24,16 @@ struct Model {
 struct ParticleSystem {
     particle_radius: f32,
     influence_radius: f32,
+    max_pressure_index: usize,
+    max_attraction_index: usize,
+    max_neighbors_index: usize,
     num_particles: usize,
     positions: Vec<Point2>,
     colors: Vec<Rgba<f32>>,
     edges: Vec<(usize, usize)>,
     pressures: Vec<Vector2>,
     attractions: Vec<Vector2>,
+    num_neighbors: Vec<usize>,
 }
 
 impl ParticleSystem {
@@ -39,16 +43,21 @@ impl ParticleSystem {
         let edges = Vec::new();
         let pressures = Vec::new();
         let attractions = Vec::new();
+        let num_neighbors = Vec::new();
 
         ParticleSystem {
             particle_radius: 4.0,
             influence_radius: 12.0,
+            max_pressure_index: 0,
+            max_attraction_index: 0,
+            max_neighbors_index: 0,
             num_particles: 0,
             positions,
             colors,
             edges,
             pressures,
             attractions,
+            num_neighbors,
         }
     }
 
@@ -65,6 +74,7 @@ impl ParticleSystem {
         self.edges.push(edges);
         self.pressures.push(pressure);
         self.attractions.push(attraction);
+        self.num_neighbors.push(0);
         self.num_particles += 1;
     }
 
@@ -97,16 +107,24 @@ impl ParticleSystem {
     }
 
     fn update(&mut self) {
-
         let old_positions = self.positions.clone();
         for i in 0..self.num_particles {
             let neighbors = self.get_neighbors_of_particle(i);
+            self.num_neighbors[i] = neighbors.len();
+
+            if self.num_neighbors[self.max_neighbors_index] < neighbors.len() {
+                self.max_neighbors_index = i;
+            }
+
             let attraction = {
                 let (b0, b1) = self.edges[i];
                 (old_positions[b0] + old_positions[b1]) / 2.0 - old_positions[i]
             };
             self.attractions[i] = attraction;
             self.positions[i] += attraction * 0.6;
+            if self.attractions[self.max_attraction_index].magnitude() < attraction.magnitude() {
+                self.max_attraction_index = i;
+            }
 
             let pressure = {
                 let mut pressure = vec2(0.0, 0.0);
@@ -115,38 +133,40 @@ impl ParticleSystem {
                         (self.positions[i] - self.positions[j]) / (self.influence_radius * 0.5);
                 }
 
-                pressure
+                pressure.limit_magnitude(2.0)
             };
             self.pressures[i] = pressure;
-            self.positions[i] += (pressure) * 0.5;
+            self.positions[i] += (pressure) * 0.2;
+            if self.pressures[self.max_pressure_index].magnitude() < pressure.magnitude() {
+                self.max_pressure_index = i;
+            }
         }
 
         for i in 0..self.num_particles {
-            let (b0, b1) = self.edges[i];
-            let (pos_b0, pos_b1) = (self.positions[b0], self.positions[b1]);
-            let pos_i = self.positions[i];
+            let p =
+                self.pressures[i].magnitude() / self.pressures[self.max_pressure_index].magnitude();
+            let a = self.attractions[i].magnitude()
+                / self.attractions[self.max_attraction_index].magnitude();
+            let n = 1.0
+                - self.num_neighbors[i] as f32
+                    / self.num_neighbors[self.max_neighbors_index] as f32;
+            self.colors[i] = Rgba::new(p, a, p * a + 0.1, 1.0);
+        }
 
-            let to_b0 = (pos_b0 - pos_i).normalize();
-            let to_b1 = (pos_b1 - pos_i).normalize();
-            let to_center = ((pos_b0 + pos_b1 + pos_i) / 3.0 - pos_i).normalize();
+        for e in 0..self.edges.len() {
+            let (p0, p1) = (e, self.edges[e].1);
+            let avg_pressure = (self.pressures[p0] + self.pressures[p1]) / 2.0;
+            let relative_magnitude =
+                avg_pressure.magnitude() / self.pressures[self.max_pressure_index].magnitude();
 
             let tolerance = 0.05;
-            if to_b0.dot(to_center).abs() < tolerance && random_f32() < 0.01 {
-                self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                self.split_at(b0, i);
+            if self.num_neighbors[p0] + self.num_neighbors[p1] < 16 && random_f32() < 0.05 {
+                // self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                // self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.split_at(p0, p1);
             } else {
-                self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-            }
-
-            if to_b1.dot(to_center).abs() < tolerance && random_f32() < 0.01 {
-                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                self.colors[b1] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-                self.split_at(i, b1);
-            } else {
-                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-                self.colors[b1] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                // self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                // self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
             }
         }
     }
@@ -155,7 +175,9 @@ impl ParticleSystem {
     fn split_at(&mut self, p0: usize, p1: usize) {
         let new_index = self.positions.len();
 
-        let position = (self.positions[p0] + self.positions[p1]) / 2.0;
+        let position = (self.positions[p0] + self.positions[p1]) / 2.0
+            + self.pressures[p0]
+            + self.pressures[p1];
         let color = (self.colors[p0] + self.colors[p1]) / 2.0;
         let edges = (p0, p1);
         let pressure = vec2(0.0, 0.0);
@@ -170,7 +192,7 @@ impl ParticleSystem {
         let mut neighbors = Vec::<usize>::new();
 
         for j in 0..self.num_particles {
-            if index == j || j == self.edges[index].0 || j == self.edges[index].1 {
+            if index == j {
                 continue;
             }
 
@@ -207,18 +229,17 @@ impl ParticleSystem {
                 self.colors[i].alpha,
             );
 
+            // draw.line()
+            //     .start(self.positions[i])
+            //     .end(self.positions[i] + self.pressures[i] * 2.0)
+            //     .thickness(thickness * 10.0)
+            //     .rgba(1.0, 0.3, 0.3, 1.0);
 
-            draw.line()
-                .start(self.positions[i])
-                .end(self.positions[i] + self.pressures[i] * 2.0)
-                .thickness(thickness * 10.0)
-                .rgba(1.0, 0.3, 0.3, 1.0);
-
-            draw.line()
-                .start(self.positions[i])
-                .end(self.positions[i] + self.attractions[i] * 2.0)
-                .thickness(thickness * 10.0)
-                .rgba(0.3, 1.0, 0.3, 1.0);
+            // draw.line()
+            //     .start(self.positions[i])
+            //     .end(self.positions[i] + self.attractions[i] * 2.0)
+            //     .thickness(thickness * 10.0)
+            //     .rgba(0.3, 1.0, 0.3, 1.0);
 
             // draw.line()
             //     .start(self.positions[i])
@@ -238,8 +259,8 @@ fn model(app: &App) -> Model {
 
     // let (_w, h) = app.window_rect().w_h();
     let mut ps = ParticleSystem::new();
-    let num_particles = 50;
-    let spawn_radius = 150.0;
+    let num_particles = 100;
+    let spawn_radius = 100.0;
     ps.spawn_particles(num_particles, spawn_radius);
 
     Model { ps }
@@ -251,8 +272,8 @@ fn update(_app: &App, m: &mut Model, _update: Update) {
 
 fn view(app: &App, m: &Model, frame: Frame) -> Frame {
     let draw = app.draw();
-    // draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
-    draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
+    draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
+    // draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
 
     m.ps.draw(&draw);
 
