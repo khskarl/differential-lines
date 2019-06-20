@@ -5,6 +5,18 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
+fn wrap(num: i32, max: i32) -> usize {
+    let wrapped = if num < 0 {
+        max - 1
+    } else if num == max {
+        0
+    } else {
+        num
+    };
+
+    wrapped as usize
+}
+
 struct Model {
     ps: ParticleSystem,
 }
@@ -30,7 +42,7 @@ impl ParticleSystem {
 
         ParticleSystem {
             particle_radius: 4.0,
-            influence_radius: 50.0,
+            influence_radius: 12.0,
             num_particles: 0,
             positions,
             colors,
@@ -64,27 +76,13 @@ impl ParticleSystem {
         for i in 0..num_particles {
             let direction = vec2(phi.cos(), phi.sin());
             let offset = (phi * 6.2).sin() * 50.0;
-            println!("Phi: {} \tOffset: {}", phi, offset);
             let position = direction * (spawn_radius + offset);
 
             let l = random_f32() * 0.8 + 0.1;
             let color = Rgba::new(l, l - random_f32() * 0.2, l - random_f32() * 0.1, 1.0);
 
-            let prev_particle = {
-                if i as i32 - 1 < 0 {
-                    num_particles - 1
-                } else {
-                    i - 1
-                }
-            };
-
-            let next_particle = {
-                if i + 1 == num_particles {
-                    0
-                } else {
-                    i + 1
-                }
-            };
+            let prev_particle = wrap(i as i32 - 1, num_particles as i32);
+            let next_particle = wrap(i as i32 + 1, num_particles as i32);
 
             let edges = (prev_particle, next_particle);
             let pressure = vec2(0.0, 0.0);
@@ -120,36 +118,36 @@ impl ParticleSystem {
                 pressure
             };
             self.pressures[i] = pressure;
-            self.positions[i] += (pressure).normalize() * 0.5;
+            self.positions[i] += (pressure) * 0.5;
         }
 
         for i in 0..self.num_particles {
-            // let (b0, b1) = self.edges[i];
-            // let (pos_b0, pos_b1) = (self.positions[b0], self.positions[b1]);
-            // let pos_i = self.positions[i];
+            let (b0, b1) = self.edges[i];
+            let (pos_b0, pos_b1) = (self.positions[b0], self.positions[b1]);
+            let pos_i = self.positions[i];
 
-            // let to_b0 = (pos_b0 - pos_i).normalize();
-            // let to_b1 = (pos_b1 - pos_i).normalize();
-            // let to_center = ((pos_b0 + pos_b1 + pos_i) / 3.0 - pos_i).normalize();
+            let to_b0 = (pos_b0 - pos_i).normalize();
+            let to_b1 = (pos_b1 - pos_i).normalize();
+            let to_center = ((pos_b0 + pos_b1 + pos_i) / 3.0 - pos_i).normalize();
 
-            // let tolerance = 0.05;
-            // if to_b0.dot(to_center).abs() < tolerance && random_f32() < 0.05 {
-            //     self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-            //     self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-            //     self.split_at(b0, i);
-            // } else {
-            //     self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-            //     self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-            // }
+            let tolerance = 0.05;
+            if to_b0.dot(to_center).abs() < tolerance && random_f32() < 0.01 {
+                self.colors[b0] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.split_at(b0, i);
+            } else {
+                self.colors[b0] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+            }
 
-            // if to_b1.dot(to_center).abs() < tolerance && random_f32() < 0.05 {
-            //     self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-            //     self.colors[b1] = Rgba::new(0.2, 0.3, 1.0, 1.0);
-            //     self.split_at(i, b1);
-            // } else {
-            //     self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-            //     self.colors[b1] = Rgba::new(1.0, 0.3, 0.2, 1.0);
-            // }
+            if to_b1.dot(to_center).abs() < tolerance && random_f32() < 0.01 {
+                self.colors[i] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.colors[b1] = Rgba::new(0.2, 0.3, 1.0, 1.0);
+                self.split_at(i, b1);
+            } else {
+                self.colors[i] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+                self.colors[b1] = Rgba::new(1.0, 0.3, 0.2, 1.0);
+            }
         }
     }
 
@@ -212,15 +210,21 @@ impl ParticleSystem {
 
             draw.line()
                 .start(self.positions[i])
-                .end(self.positions[i] + self.pressures[i])
-                .thickness(thickness)
-                .rgba(1.0, 0.6, 0.6, 1.0);
+                .end(self.positions[i] + self.pressures[i] * 2.0)
+                .thickness(thickness * 10.0)
+                .rgba(1.0, 0.3, 0.3, 1.0);
 
             draw.line()
                 .start(self.positions[i])
-                .end(self.positions[i] + self.attractions[i])
-                .thickness(thickness)
-                .rgba(0.6, 1.0, 0.6, 1.0);
+                .end(self.positions[i] + self.attractions[i] * 2.0)
+                .thickness(thickness * 10.0)
+                .rgba(0.3, 1.0, 0.3, 1.0);
+
+            // draw.line()
+            //     .start(self.positions[i])
+            //     .end(self.positions[i] + (self.attractions[i] + self.pressures[i]) * 2.0)
+            //     .thickness(thickness * 30.0)
+            //     .rgba(1.0, 1.0, 1.0, 1.0);
         }
     }
 }
@@ -234,7 +238,7 @@ fn model(app: &App) -> Model {
 
     // let (_w, h) = app.window_rect().w_h();
     let mut ps = ParticleSystem::new();
-    let num_particles = 20;
+    let num_particles = 50;
     let spawn_radius = 150.0;
     ps.spawn_particles(num_particles, spawn_radius);
 
@@ -247,8 +251,8 @@ fn update(_app: &App, m: &mut Model, _update: Update) {
 
 fn view(app: &App, m: &Model, frame: Frame) -> Frame {
     let draw = app.draw();
-    draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
-    // draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
+    // draw.background().color(Rgba::new(0.01, 0.01, 0.01, 0.2));
+    draw.rect().w_h(1280.0, 720.0).rgba(0.01, 0.01, 0.01, 0.09);
 
     m.ps.draw(&draw);
 
